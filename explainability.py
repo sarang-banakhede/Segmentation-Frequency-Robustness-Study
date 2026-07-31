@@ -100,7 +100,7 @@ class GradCAM:
 
 
 GRADCAM_TARGETS = {
-    "unet":      lambda m: m.enc4.double_conv,
+    "unet":    : lambda m: m.enc4.net,
     "transunet": lambda m: m.transformer.embeddings.hybrid_model.body.block3,
 }
 
