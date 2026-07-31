@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -60,8 +59,8 @@ def train_epoch(model, loader, criterion, optimizer, device, scaler):
         imgs, masks = imgs.to(device), masks.to(device)
         optimizer.zero_grad(set_to_none=True)
         with torch.amp.autocast(device.type, enabled=(scaler is not None)):
-            prob = torch.sigmoid(model(imgs))
-            total, dl, bl = criterion(prob, masks)
+            logits = model(imgs)
+            total, dl, bl = criterion(logits, masks)
         if scaler:
             scaler.scale(total).backward()
             scaler.step(optimizer)
@@ -84,8 +83,8 @@ def eval_epoch(model, loader, criterion, device):
 
     for imgs, masks in tqdm(loader, desc="   eval", leave=False):
         imgs, masks = imgs.to(device), masks.to(device)
-        prob = torch.sigmoid(model(imgs))
-        total, dl, bl = criterion(prob, masks)
+        logits = model(imgs)
+        total, dl, bl = criterion(logits, masks)
         b = imgs.size(0)
         tot += total.item() * b; dice_l += dl.item() * b; bce_l += bl.item() * b; n += b
 
