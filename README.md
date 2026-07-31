@@ -246,7 +246,6 @@ output/
 ## Notes
 
 - This repository documents the pipeline, not the findings. Statistical testing, effect sizes, and discussion live in the manuscript, which is currently under review and not included here.
-- All 12 model x dataset combinations use an identical training protocol; architecture and modality are the only variables that change between runs.
 
 ## Citation
 
