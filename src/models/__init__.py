@@ -2,16 +2,16 @@ import torch
 import torch.nn as nn
 
 from .unet import UNet
-from .transunet import TransUNet, _get_r50_b16_config
-from .swin_unet import SwinTransformerSys
+from .transunet import TransUNet
 from .swin_unet import SwinTransformerSys, _window_partition, _window_reverse
+
 
 def build_model(name: str, in_ch: int, img_size: int = 256) -> nn.Module:
     name = name.lower()
     if name == "unet":
         return UNet(in_channels=in_ch, out_channels=1)
     if name == "transunet":
-        return TransUNet(_get_r50_b16_config(), img_size=img_size, num_classes=1)
+        return TransUNet(img_size=img_size, num_classes=1)
     if name == "swin":
         return SwinTransformerSys(
             img_size=img_size, patch_size=4, in_chans=in_ch, num_classes=1,
