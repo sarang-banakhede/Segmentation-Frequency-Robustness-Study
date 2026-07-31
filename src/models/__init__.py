@@ -4,7 +4,7 @@ import torch.nn as nn
 from .unet import UNet
 from .transunet import TransUNet, _get_r50_b16_config
 from .swin_unet import SwinTransformerSys
-
+from .swin_unet import SwinTransformerSys, _window_partition, _window_reverse
 
 def build_model(name: str, in_ch: int, img_size: int = 256) -> nn.Module:
     name = name.lower()
