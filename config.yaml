@@ -1,0 +1,88 @@
+# ── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+  dataset_root: "Dataset"   
+  output_dir:   "output"    
+
+# ── Datasets ──────────────────────────────────────────────────────────────────
+datasets:
+  isic2016:
+    subdir:      "Dermoscopy_ISIC2016"
+    in_channels: 3
+    norm_mean: [0.485, 0.456, 0.406]
+    norm_std:  [0.229, 0.224, 0.225]
+  kvasir:
+    subdir:      "Endoscopy_Kvasir"
+    in_channels: 3
+    norm_mean: [0.485, 0.456, 0.406]
+    norm_std:  [0.229, 0.224, 0.225]
+  thyroid:
+    subdir:      "Ultrasound_Thyroid"
+    in_channels: 1
+    norm_mean: [0.5]
+    norm_std:  [0.5]
+  refuge2:
+    subdir:      "Retinal_REFUGE2"
+    in_channels: 3
+    norm_mean: [0.485, 0.456, 0.406]
+    norm_std:  [0.229, 0.224, 0.225]
+
+# ── Experiment matrix: 3 models × 4 datasets = 12 runs ───────────────────────
+experiments:
+  - [unet,      isic2016]
+  - [unet,      kvasir]
+  - [unet,      thyroid]
+  - [unet,      refuge2]
+  - [transunet, isic2016]
+  - [transunet, kvasir]
+  - [transunet, thyroid]
+  - [transunet, refuge2]
+  - [swin,      isic2016]
+  - [swin,      kvasir]
+  - [swin,      thyroid]
+  - [swin,      refuge2]
+
+# ── Training ──────────────────────────────────────────────────────────────────
+training:
+  img_size:    256
+  epochs:      80
+  batch_size:  32    
+  lr:          1.0e-4
+  seed:        42
+  num_workers: 4
+  augmentation:
+    hflip:        true
+    vflip:        true
+    rotation_deg: 30
+    brightness:   0.2
+    contrast:     0.2
+
+# ── Inference / frequency sweep ───────────────────────────────────────────────
+inference:
+  batch_size:         16
+  num_workers:        4
+  sigma_start:        1
+  sigma_end:          50
+  cft_drop_threshold: 10.0   
+
+# ── Explainability (one representative test image per dataset) ─────────────────
+explainability:
+
+  image_paths:
+    isic2016: "ISIC_0000020.png"
+    kvasir:   "cju0tl3uz8blh0993wxvn7ly3.png"
+    thyroid:  "0000.png"
+    refuge2:  "T0001.png"
+
+  experiments:
+    - [unet,      isic2016, 25]
+    - [unet,      kvasir,   25]
+    - [unet,      thyroid,  25]
+    - [unet,      refuge2,  25]
+    - [transunet, isic2016, 25]
+    - [transunet, kvasir,   25]
+    - [transunet, thyroid,  25]
+    - [transunet, refuge2,  25]
+    - [swin,      isic2016, 25]
+    - [swin,      kvasir,   25]
+    - [swin,      thyroid,  25]
+    - [swin,      refuge2,  25]
