@@ -1,108 +1,129 @@
-# FreqSafe — Frequency Robustness Analysis of Medical Image Segmentation Models
+# Frequency Robustness of Medical Image Segmentation Models
+### The Dice Trap: Why Clean Accuracy Fails to Predict Frequency Robustness in Medical Image Segmentation
 
-Medical image segmentation models are typically evaluated on Dice score — and that's the problem.
+> Status: manuscript under review, not yet published.
 
-A model that achieves high Dice on clean test data may completely collapse when the input quality drops even slightly. This project investigates whether Dice score actually predicts how robust a model is to frequency-domain perturbations (Gaussian blur), and does so systematically across multiple architectures and imaging modalities.
+---
+ 
+## The Problem
+ 
+Segmentation models are ranked almost entirely by Dice score on clean, protocol-matched test data, a world the model never actually inhabits after deployment. Scanner hardware, reconstruction kernels, defocus, and patient motion reshape the spatial-frequency content of every image, and a clean-data leaderboard is blind to that axis by construction.
+ 
+This project tests the Dice Trap hypothesis: a high clean Dice score does not just fail to predict robustness under frequency degradation, it can actively invert it. Three further questions follow:
+ 
+- Does modality or architecture drive how fast and how badly a model collapses?
+- What does that collapse cost clinically, measured in missed structures rather than an overlap score?
+- Do these reliability properties hold under realistic conditions, or are they specific to one convenient setup?
+ 
+---
 
-The core question: **if two models have similar Dice scores, do they fail at the same rate under degradation?**
+## Approach
 
-The experiments here test three architectures — a pure CNN (UNet), a CNN-Transformer hybrid (TransUNet), and a pure Transformer (SwinUNet) — across four medical imaging modalities: dermoscopy, endoscopy, ultrasound, and retinal fundus. Each model is trained clean, then evaluated under progressive Gaussian blur (σ = 1 to 50), with 13 segmentation metrics tracked per image per sigma level.
+Three architecturally distinct segmentation paradigms are trained from scratch under an identical protocol, then stress-tested with a controlled, continuous frequency-domain perturbation. Holding architecture, training protocol, and evaluation identical across four imaging modalities isolates whether robustness is governed by the model or by the data.
 
-Two robustness metrics are introduced:
-- **CFT** (Critical Frequency Threshold) — the first blur level where Dice drops ≥10% from baseline
-- **FRI** (Frequency Robustness Index) — normalized area under the Dice-vs-σ curve; higher = more robust
+| Model | Architecture | Params |
+|---|---|---|
+| `unet` | Classic CNN encoder-decoder with skip connections | ~31M |
+| `transunet` | CNN-Transformer hybrid (ResNetV2 encoder + ViT) | ~93M |
+| `swin` | Pure Transformer (Swin-Unet, shifted-window attention) | ~27M |
 
-The findings reveal a consistent pattern across modalities that challenges how robustness is assumed to correlate with clean performance. Full analysis is in the accompanying paper.
+| Dataset | Modality | Channels | Frequency character |
+|---|---|---|---|
+| `isic2016` | Dermoscopy | 3 (RGB) | Texture-rich, high-frequency |
+| `kvasir` | Endoscopy | 3 (RGB) | Shape-dominant, mid-frequency |
+| `thyroid` | Ultrasound | 1 (grayscale) | Speckle-governed, sparse high-frequency |
+| `refuge2` | Retinal fundus | 3 (RGB) | Fine vasculature, moderate-to-high frequency |
+
+12 model x dataset combinations, each trained independently and evaluated across 51 blur levels (clean plus sigma 1 to 50), with 13 segmentation metrics tracked per image at every level spanning overlap (Dice, IoU), confusion structure (precision, recall, specificity, FNR, FPR), boundary accuracy (HD95, ASSD, boundary-F1), and topology (clDice).
+
+| Component | Details |
+|---|---|
+| **Perturbation** | Isotropic Gaussian low-pass filtering, applied to the raw image before normalization to preserve its physical interpretation as progressive high-frequency information loss. |
+| **CFT (Critical Frequency Threshold)** | The first blur level at which Dice drops at least 10% from that model's own clean baseline. Higher CFT means the model tolerates more degradation before meaningful failure. |
+| **FRI (Frequency Robustness Index)** | Normalized area under the Dice-vs-sigma curve (0 to 1). Two models can share a CFT and still differ in how much performance they retain beyond it; FRI captures that. |
+| **Clinical cost** | False Negative Rate (FNR) at representative blur levels, since a missed structure is the error that matters most in tumour, polyp, nodule, and optic-disc segmentation. |
+
+Statistical testing, effect sizes, and the full result set live in the accompanying manuscript and are intentionally not included in this repository. What follows documents the pipeline itself: what it does, how it's configured, and exactly what goes in and comes out.
 
 ---
 
-## Models
+## Repository Structure
 
-| Key | Architecture | Params |
-|---|---|---|
-| `unet` | Classic encoder-decoder with skip connections | ~31M |
-| `transunet` | ResNetV2 CNN encoder + ViT + CNN decoder | ~93M |
-| `swin` | Swin Transformer encoder-decoder (Swin-UNet) | ~27M |
-
-## Datasets
-
-| Key | Modality | Dataset | Channels |
-|---|---|---|---|
-| `isic2016` | Dermoscopy | ISIC 2016 | 3 |
-| `kvasir` | Endoscopy | Kvasir-SEG | 3 |
-| `thyroid` | Ultrasound | TN3K | 1 |
-| `refuge2` | Retinal fundus | REFUGE2 | 3 |
+```
+.
+├── train.py               training pipeline with resume + multi-GPU
+├── inference.py            frequency sweep inference
+├── explainability.py       GradCAM / attention rollout on a representative image
+├── config.yaml              all settings live here
+├── requirements.txt
+│
+├── src/
+│   ├── models/
+│   │   ├── __init__.py    build_model() and load_checkpoint()
+│   │   ├── unet.py
+│   │   ├── transunet.py
+│   │   └── swin_unet.py
+│   ├── dataset.py          training and inference dataset classes
+│   ├── losses.py            Soft-Dice + BCE combined loss
+│   ├── metrics.py           all 13 segmentation metrics
+│   ├── filters.py           Gaussian low-pass filter
+│   ├── config_loader.py    resolves config.yaml into absolute paths
+│   └── utils.py             seed, CSV helpers
+│
+├── Dataset/                your data (gitignored)
+├── output/                 generated outputs (gitignored)
+└── old/                    original Kaggle notebook and rough scripts
+```
 
 ---
 
 ## Setup
 
 ```bash
-git clone https://github.com/your-username/freqsafe.git
-cd freqsafe
+git clone https://github.com/sarang-banakhede/dice-trap-freqsafe.git
+cd dice-trap-freqsafe
 pip install -r requirements.txt
 ```
 
----
+### Dataset layout
 
-## Dataset folder structure
-
-All datasets go under a single `Dataset/` folder. Each dataset has its own subdirectory with a `train/` and `test/` split, each containing an `images/` and `masks/` folder.
+All datasets go under a single `Dataset/` folder, each in its own subdirectory with a `train/` and `test/` split, each containing `images/` and `masks/`.
 
 ```
 Dataset/
 ├── Dermoscopy_ISIC2016/
-│   ├── train/
-│   │   ├── images/
-│   │   └── masks/
-│   └── test/
-│       ├── images/
-│       └── masks/
-│
+│   ├── train/{images,masks}/
+│   └── test/{images,masks}/
 ├── Endoscopy_Kvasir/
-│   ├── train/
-│   │   ├── images/
-│   │   └── masks/
-│   └── test/
-│       ├── images/
-│       └── masks/
-│
+│   ├── train/{images,masks}/
+│   └── test/{images,masks}/
 ├── Ultrasound_Thyroid/
-│   ├── train/
-│   │   ├── images/
-│   │   └── masks/
-│   └── test/
-│       ├── images/
-│       └── masks/
-│
+│   ├── train/{images,masks}/
+│   └── test/{images,masks}/
 └── Retinal_REFUGE2/
-    ├── train/
-    │   ├── images/
-    │   └── masks/
-    └── test/
-        ├── images/
-        └── masks/
+    ├── train/{images,masks}/
+    └── test/{images,masks}/
 ```
 
-**Rules for images and masks**
+| Rule | Detail |
+|---|---|
+| Filenames | Every image needs a mask with the exact same filename, e.g. `ISIC_0000020.png` to `ISIC_0000020.png`. |
+| Mask encoding | Grayscale; pixel value > 127 is foreground, <= 127 is background. |
+| Formats | `.png`, `.jpg`, `.jpeg`. |
+| Channels | Thyroid (ultrasound) is single-channel grayscale; everything else is RGB. Handled automatically via `in_channels` in `config.yaml`, no manual conversion needed. |
 
-- Every image must have a corresponding mask with the **exact same filename** (e.g. `ISIC_0000020.png` → `ISIC_0000020.png`)
-- Masks must be grayscale — pixel value > 127 is foreground, ≤ 127 is background
-- Supported formats: `.png`, `.jpg`, `.jpeg`
-- Thyroid (ultrasound) images are single-channel grayscale. Everything else is RGB. The pipeline handles this automatically based on `in_channels` in `config.yaml` — no manual conversion needed
-
-The subdirectory names (`Dermoscopy_ISIC2016`, `Endoscopy_Kvasir`, etc.) are configured in `config.yaml` under `datasets → subdir`. You can rename them as long as you update the config to match.
+Subdirectory names are configurable under `datasets -> subdir` in `config.yaml`; rename freely as long as the config matches.
 
 ---
 
 ## Configuration
 
-`config.yaml` is the single source of truth for all paths, hyperparameters, and experiment settings.
+`config.yaml` is the single source of truth for paths, per-dataset settings, hyperparameters, and the experiment matrix.
 
 ```yaml
 paths:
-  dataset_root: "Dataset"    # root folder containing all dataset subdirectories
-  output_dir:   "output"     # all weights, CSVs, and summaries go here
+  dataset_root: "Dataset"
+  output_dir:   "output"
 
 datasets:
   isic2016:
@@ -112,7 +133,7 @@ datasets:
     norm_std:    [0.229, 0.224, 0.225]
   thyroid:
     subdir:      "Ultrasound_Thyroid"
-    in_channels: 1           # grayscale — single channel
+    in_channels: 1
     norm_mean:   [0.5]
     norm_std:    [0.5]
 
@@ -124,110 +145,64 @@ experiments:
 training:
   img_size:    256
   epochs:      80
-  batch_size:  32            # TransUNet is always forced to 8 (memory)
+  batch_size:  32     # TransUNet is always forced to 8 (memory)
   lr:          1.0e-4
   seed:        42
 
 inference:
   sigma_start:        1
   sigma_end:          50
-  cft_drop_threshold: 10.0   # % Dice drop that defines the CFT
+  cft_drop_threshold: 10.0
 
 explainability:
-  image_paths:              # one representative test image per dataset
+  image_paths:               # one representative test image per dataset
     isic2016: "ISIC_0000020.png"
     thyroid:  "0000.png"
-  experiments:               # [model, dataset, critical_sigma] — sigma from freq_summary.csv
+  experiments:                # [model, dataset, critical_sigma]
     - [unet, isic2016, 25]
     - [swin, thyroid,  25]
-    # ... one row per model+dataset you want explainability for
 ```
 
-To use your own dataset: add a new entry under `datasets:`, set the correct `subdir`, `in_channels`, and normalization stats, then add it to the `experiments:` list.
+To add a new dataset, add an entry under `datasets:` with the correct `subdir`, `in_channels`, and normalization stats, then reference it in `experiments:`.
 
 ---
 
-## Training
+## Usage
 
-**Train all 12 experiments sequentially**
+### 1. Training
+
 ```bash
-python train.py
+python train.py                                       # all 12 experiments
+python train.py --model unet --dataset isic2016        # a single combination
+python train.py --epochs 100 --lr 5e-4 --batch-size 16 # override hyperparameters
 ```
 
-**Train a specific model and dataset**
+Interrupted runs resume automatically: `train.py` reads `epoch_metrics.csv` to find the last completed epoch, reloads `last.pth`, and continues. Multi-GPU is automatic via `DataParallel` when `torch.cuda.device_count() > 1`.
+
+### 2. Inference (frequency sweep)
+
 ```bash
-python train.py --model unet --dataset isic2016
-python train.py --model transunet --dataset kvasir
-python train.py --model swin --dataset thyroid
-```
-
-**Override hyperparameters from command line**
-```bash
-python train.py --epochs 100 --lr 5e-4 --batch-size 16
-python train.py --model unet --dataset refuge2 --epochs 50
-```
-
-**Resuming an interrupted run** is automatic — the script reads `epoch_metrics.csv` to find the last completed epoch, loads `last.pth`, and picks up from there. No flags needed.
-
-**Multi-GPU** is also automatic. If `torch.cuda.device_count() > 1`, DataParallel is used. Single GPU and CPU work without any changes.
-
----
-
-## Inference
-
-After training, run the frequency sweep. This loads `best.pth` for each experiment, runs clean inference, then evaluates the model at every σ level from `sigma_start` to `sigma_end`.
-
-**Run inference on all 12 experiments**
-```bash
-python inference.py
-```
-
-**Single model + dataset**
-```bash
+python inference.py                                                # all 12 experiments
 python inference.py --model unet --dataset isic2016
+python inference.py --sigma-start 1 --sigma-end 30 --cft-threshold 5.0
 ```
 
-**Custom sigma range or CFT sensitivity**
+Loads `best.pth`, runs clean inference, then sweeps sigma from `sigma_start` to `sigma_end`. Skips experiments without a trained `best.pth`, and skips output files that already exist, so partial runs are safe to resume.
+
+### 3. Explainability
+
 ```bash
-python inference.py --sigma-start 1 --sigma-end 30
-python inference.py --cft-threshold 5.0
-python inference.py --model swin --dataset refuge2 --sigma-end 25 --cft-threshold 15.0
-```
-
-Inference skips any experiment where `best.pth` does not exist (i.e. not trained yet). It also skips individual output files that already exist, so partial runs are safe to resume.
-
----
-
-## Explainability
-
-For each `[model, dataset, sigma]` entry under `explainability.experiments` in `config.yaml`, this loads `best.pth`, runs the model on the configured representative image (`explainability.image_paths`) both clean and low-pass blurred at the given `sigma`, and saves the predicted mask overlay plus a saliency map — GradCAM for UNet/TransUNet, attention rollout for SwinUNet.
-
-**Run all configured experiments**
-```bash
-python explainability.py
-```
-
-**Single model + dataset**
-```bash
+python explainability.py                              # all configured entries
 python explainability.py --model unet --dataset isic2016
 ```
 
-The `sigma` for each entry is the CFT you found from that experiment's `freq_summary.csv` (or any blur level you want to inspect). Output goes to `output/{model}_{dataset}/explainability/`:
-
-| File | Description |
-|---|---|
-| `1_original.png` | Clean image with predicted mask overlay |
-| `2_lowpass_cft.png` | Image blurred at `sigma`, with predicted mask overlay |
-| `3_gradcam_original.png` / `4_gradcam_lowpass_cft.png` | GradCAM heatmap, clean vs. blurred (UNet, TransUNet) |
-| `3_attention_original.png` / `4_attention_lowpass_cft.png` | Swin attention rollout, clean vs. blurred (SwinUNet) |
-
-Experiments are skipped if `best.pth` or the representative image doesn't exist.
+For each `[model, dataset, sigma]` entry under `explainability.experiments`, this loads `best.pth`, runs the model on the configured representative image both clean and low-pass blurred at the given sigma, and saves the predicted mask overlay plus a saliency map: GradCAM for U-Net and TransUNet, attention rollout for Swin-Unet. The `sigma` used is typically that experiment's CFT from `freq_summary.csv`, but any blur level can be inspected. Skipped if `best.pth` or the representative image doesn't exist.
 
 ---
 
-## Output folder structure
+## Output
 
-Everything lands under `output/`, organized by `{model}_{dataset}/`.
+Everything lands under `output/{model}_{dataset}/`:
 
 ```
 output/
@@ -239,145 +214,40 @@ output/
 │   ├── per_image_blur.csv
 │   ├── freq_sweep.csv
 │   ├── freq_summary.csv
-│   └── explainability/          ← only if listed in explainability.experiments
+│   └── explainability/         only if listed in explainability.experiments
 │       ├── 1_original.png
 │       ├── 2_lowpass_cft.png
 │       ├── 3_gradcam_original.png
 │       └── 4_gradcam_lowpass_cft.png
-│
-├── transunet_isic2016/
-│   └── (same structure)
-│
-├── swin_isic2016/
-│   └── (same structure)
-│
-├── unet_kvasir/ ...
-├── transunet_kvasir/ ...
-│
-└── master_freq_summary.csv     ← all 12 experiments in one file
+├── transunet_isic2016/  (same structure)
+├── swin_isic2016/       (same structure)
+├── ...
+└── master_freq_summary.csv     all 12 experiments combined
 ```
 
-### What each file contains
+| File | Granularity | Contents |
+|---|---|---|
+| `best.pth` | - | Weights at the epoch with highest validation Dice. Used for inference. |
+| `last.pth` | - | Weights + optimizer state at the last completed epoch. Used only to resume training. |
+| `epoch_metrics.csv` | 1 row / epoch | Train/test loss components (total, Dice, BCE) plus all 13 validation metrics. |
+| `per_image_clean.csv` | 1 row / test image | All 13 metrics at sigma = 0 (no perturbation). |
+| `per_image_blur.csv` | 1 row / test image | All 13 metrics at every sigma, wide format (`{metric}_sigma{sigma}`), 651 columns total. |
+| `freq_sweep.csv` | 1 row / sigma level | All 13 metrics averaged across test images, plus `dice_drop_pct` and `cft_flag`. |
+| `freq_summary.csv` | 1 row | Per-experiment summary: `baseline_dice`, `cft_sigma`, `fri`, Dice/FNR at sigma = 10/25/50. |
+| `master_freq_summary.csv` | 1 row / experiment | All 12 `freq_summary.csv` rows combined. |
+| `explainability/*.png` | 1 set / configured entry | Mask overlays and saliency maps, clean vs. blurred at the configured sigma. |
 
-**`best.pth`**
-Model weights at the epoch with the highest validation Dice. This is what inference uses.
+### The 13 metrics (tracked at every granularity above)
 
-**`last.pth`**
-Model weights at the last completed epoch, along with optimizer state. Used only for resuming interrupted training.
-
----
-
-**`epoch_metrics.csv`**
-One row per training epoch. Tracks loss and all 13 validation metrics across the full training run.
-
-| Column | Description |
-|---|---|
-| `epoch` | Epoch number |
-| `train_total_loss` | Combined Dice + BCE loss on training set |
-| `train_dice_loss` | Soft-Dice loss component |
-| `train_bce_loss` | Binary cross-entropy component |
-| `test_total_loss` | Combined loss on validation/test set |
-| `test_dice_loss` | Dice loss on test set |
-| `test_bce_loss` | BCE loss on test set |
-| `dice_score` | Dice coefficient on test set |
-| `iou` | Intersection over Union |
-| `pixel_accuracy` | Overall pixel-level accuracy |
-| `precision` | TP / (TP + FP) |
-| `recall` | TP / (TP + FN) |
-| `specificity` | TN / (TN + FP) |
-| `f1_score` | Harmonic mean of precision and recall |
-| `fnr` | False Negative Rate — fraction of lesion missed |
-| `fpr` | False Positive Rate |
-| `hd95` | 95th percentile Hausdorff Distance (boundary accuracy) |
-| `assd` | Average Symmetric Surface Distance |
-| `bf_score` | Boundary F1 score |
-| `cldice` | Centerline Dice — topology-aware metric |
+`dice_score` - `iou` - `pixel_accuracy` - `precision` - `recall` - `specificity` - `f1_score` - `fnr` - `fpr` - `hd95` - `assd` - `bf_score` - `cldice`
 
 ---
 
-**`per_image_clean.csv`**
-One row per test image, no perturbation. Contains all 13 metrics for every individual image at baseline (σ = 0).
+## Notes
 
-| Column | Description |
-|---|---|
-| `image_name` | Filename stem of the test image |
-| `dice_score` ... `cldice` | All 13 metrics for that image |
+- This repository documents the pipeline, not the findings. Statistical testing, effect sizes, and discussion live in the manuscript, which is currently under review and not included here.
+- All 12 model x dataset combinations use an identical training protocol; architecture and modality are the only variables that change between runs.
 
----
+## Citation
 
-**`per_image_blur.csv`**
-One row per test image, with metrics at every sigma level. Wide format — columns are named `{metric}_sigma{σ}`.
-
-| Column | Description |
-|---|---|
-| `image_name` | Filename stem |
-| `dice_score_sigma1` | Dice at σ = 1 |
-| `dice_score_sigma2` | Dice at σ = 2 |
-| ... | ... |
-| `cldice_sigma50` | clDice at σ = 50 |
-
-Total columns = 1 (image_name) + 13 metrics × 50 sigma levels = 651 columns.
-
----
-
-**`freq_sweep.csv`**
-One row per sigma level (including σ = 0 as baseline). Aggregated across all test images.
-
-| Column | Description |
-|---|---|
-| `model` | Model name |
-| `dataset` | Dataset name |
-| `sigma` | Blur level (0 = clean) |
-| `dice_score` ... `cldice` | Mean of each metric across all test images |
-| `dice_drop_pct` | % drop in Dice relative to baseline |
-| `cft_flag` | `True` if Dice drop ≥ CFT threshold at this sigma |
-
----
-
-**`freq_summary.csv`**
-One row — the per-experiment robustness summary.
-
-| Column | Description |
-|---|---|
-| `model` | Model name |
-| `dataset` | Dataset name |
-| `baseline_dice` | Clean Dice (σ = 0) |
-| `cft_sigma` | First σ where Dice drops ≥10% — `never` if it never drops |
-| `fri` | Frequency Robustness Index (normalized AUC, 0–1) |
-| `dice_at_sigma10/25/50` | Dice at three key checkpoints |
-| `fnr_at_sigma10/25/50` | False Negative Rate at three key checkpoints |
-
----
-
-**`master_freq_summary.csv`**
-All 12 experiments combined into one file (same columns as `freq_summary.csv`). Generated at the end of `python inference.py`.
-
----
-
-## Repository structure
-
-```
-freqsafe/
-├── train.py              ← training pipeline with resume + multi-GPU
-├── inference.py          ← frequency sweep inference
-├── explainability.py     ← GradCAM / attention rollout on a representative image
-├── config.yaml           ← all settings live here
-├── requirements.txt
-│
-├── src/
-│   ├── models/
-│   │   ├── __init__.py   ← build_model() and load_checkpoint()
-│   │   ├── unet.py
-│   │   ├── transunet.py
-│   │   └── swin_unet.py
-│   ├── dataset.py        ← training and inference dataset classes
-│   ├── losses.py         ← Soft-Dice + BCE combined loss
-│   ├── metrics.py        ← all 13 segmentation metrics
-│   ├── filters.py        ← Gaussian low-pass filter
-│   ├── config_loader.py  ← resolves config.yaml into absolute paths
-│   └── utils.py          ← seed, CSV helpers
-│
-├── Dataset/              ← your data (gitignored)
-├── output/               ← generated outputs (gitignored)
-└── old/                  ← original Kaggle notebook and rough scripts
-```
+A citation entry will be added once the manuscript is accepted.
