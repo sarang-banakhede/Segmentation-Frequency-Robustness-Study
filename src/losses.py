@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -18,8 +19,9 @@ class CombinedLoss(nn.Module):
         super().__init__()
         self._dice = _SoftDice(smooth)
 
-    def forward(self, prob, target):
-        p        = prob.clamp(1e-7, 1.0 - 1e-7)
+    def forward(self, logits, target):
+        prob = torch.sigmoid(logits)
+        p = prob.clamp(1e-7, 1.0 - 1e-7)
         dice_val = self._dice(p, target)
-        bce_val  = F.binary_cross_entropy(p.float(), target.float())
+        bce_val = F.binary_cross_entropy_with_logits(logits.float(), target.float())
         return dice_val + bce_val, dice_val, bce_val
